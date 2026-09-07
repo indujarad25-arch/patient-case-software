@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { Doctor, AuthState } from '../types';
+import { createContext, useContext, useState, useEffect } from 'react';
+import type { ReactNode } from 'react';
+import type { Doctor, AuthState } from '../types';
 import { authService } from '../api/authService';
 
 interface AuthContextValue extends AuthState {

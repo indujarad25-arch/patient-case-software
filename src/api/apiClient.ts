@@ -1,7 +1,8 @@
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
+import axios from 'axios';
+import type { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
-const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false'; // default to mock when backend not available
+const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
 
 export { USE_MOCK };
 
@@ -32,7 +33,6 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401) {
       localStorage.removeItem('auth_token');
       localStorage.removeItem('auth_doctor');
-      window.location.href = '/login';
     }
     return Promise.reject(error);
   }

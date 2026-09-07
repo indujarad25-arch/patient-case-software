@@ -1,36 +1,12 @@
-import { useState } from "react";
-
-type Patient = {
-  id: string;
-  name: string;
-  age: number;
-  gender: string;
-  condition: string;
-};
-
-const patients: Patient[] = [
-  {
-    id: "PT-1001",
-    name: "Arun Kumar",
-    age: 42,
-    gender: "Male",
-    condition: "Hypertension",
-  },
-  {
-    id: "PT-1002",
-    name: "Priya Sharma",
-    age: 29,
-    gender: "Female",
-    condition: "Migraine",
-  },
-  {
-    id: "PT-1003",
-    name: "Rahul Raj",
-    age: 35,
-    gender: "Male",
-    condition: "Diabetes",
-  },
-];
+import { useState, useEffect } from "react";
+import { authService } from "./api/authService";
+import { patientService } from "./api/patientService";
+import { caseService } from "./api/caseService";
+import { documentService } from "./api/documentService";
+import { historyService } from "./api/historyService";
+import { prescriptionService } from "./api/prescriptionService";
+import { doctorAIService } from "./api/doctorAIService";
+import type { Doctor, Patient, ClinicalCase, MedicalDocument, HistoryEvent, Prescription as PrescriptionType, AISource } from "./types";
 
 function App() {
   const [loggedIn, setLoggedIn] = useState(false);
@@ -38,14 +14,25 @@ function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [doctorProfile, setDoctorProfile] = useState<Doctor | null>(null);
 
   const [showQR, setShowQR] = useState(false);
   const [qrPatientId, setQrPatientId] = useState("");
   const [scannedPatient, setScannedPatient] = useState<Patient | null>(null);
-
   const [showOptions, setShowOptions] = useState(false);
 
-  const handleLogin = () => {
+  const [patientList, setPatientList] = useState<Patient[]>([]);
+
+  useEffect(() => {
+    if (loggedIn) {
+      authService.getProfile().then((doc) => setDoctorProfile(doc)).catch(() => {});
+      patientService.getPatients().then((res) => {
+        if (res && res.data) setPatientList(res.data);
+      }).catch(() => {});
+    }
+  }, [loggedIn]);
+
+  const handleLogin = async () => {
     if (!email.trim()) {
       setError("Please enter your Doctor ID or Email.");
       return;
@@ -56,22 +43,41 @@ function App() {
       return;
     }
 
-    setError("");
-    setLoggedIn(true);
-    setPage("Dashboard");
+    try {
+      setError("");
+      const res = await authService.login({ identifier: email, password });
+      if (res && res.doctor) {
+        setDoctorProfile(res.doctor);
+      }
+      setLoggedIn(true);
+      setPage("Dashboard");
+    } catch (err: any) {
+      setError(err?.response?.data?.message || "Invalid credentials. Please try again.");
+    }
   };
 
-  const handleQRSearch = () => {
-    const patient = patients.find(
-      (p) => p.id.toLowerCase() === qrPatientId.trim().toLowerCase()
-    );
-
-    if (patient) {
-      setScannedPatient(patient);
-      setShowQR(false);
-      setQrPatientId("");
-    } else {
-      alert("Patient not found. Please check the Patient ID.");
+  const handleQRSearch = async () => {
+    if (!qrPatientId.trim()) return;
+    try {
+      const patient = await patientService.getPatient(qrPatientId.trim());
+      if (patient) {
+        setScannedPatient(patient);
+        setShowQR(false);
+        setQrPatientId("");
+      } else {
+        alert("Patient not found. Please check the Patient ID.");
+      }
+    } catch {
+      const found = patientList.find(
+        (p) => p.patientId.toLowerCase() === qrPatientId.trim().toLowerCase() || p.id === qrPatientId.trim()
+      );
+      if (found) {
+        setScannedPatient(found);
+        setShowQR(false);
+        setQrPatientId("");
+      } else {
+        alert("Patient not found. Please check the Patient ID.");
+      }
     }
   };
 
@@ -296,6 +302,9 @@ function App() {
     );
   }
 
+  const doctorName = doctorProfile ? doctorProfile.name : "Dr. Rajesh Sharma";
+  const doctorSpec = doctorProfile ? doctorProfile.specialization : "General Cardiology & Internal Medicine";
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-teal-50 via-cyan-50 to-indigo-100 flex">
 
@@ -371,6 +380,7 @@ function App() {
 
           <button
             onClick={() => {
+              authService.logout().catch(() => {});
               setLoggedIn(false);
               setEmail("");
               setPassword("");
@@ -408,17 +418,21 @@ function App() {
             <div className="hidden sm:block text-right">
 
               <p className="font-semibold text-slate-800">
-                Dr. Ananya Kumar
+                {doctorName}
               </p>
 
               <p className="text-xs text-teal-600">
-                General Physician
+                {doctorSpec}
               </p>
 
             </div>
 
-            <div className="w-11 h-11 rounded-full bg-gradient-to-br from-rose-100 to-pink-100 border border-rose-200 flex items-center justify-center text-xl">
-              👩‍⚕️
+            <div className="w-11 h-11 rounded-full bg-gradient-to-br from-rose-100 to-pink-100 border border-rose-200 flex items-center justify-center text-xl overflow-hidden">
+              {doctorProfile?.avatar ? (
+                <img src={doctorProfile.avatar} alt="Doctor" className="w-full h-full object-cover" />
+              ) : (
+                "👩‍⚕️"
+              )}
             </div>
 
             <button
@@ -437,7 +451,7 @@ function App() {
                     ACCOUNT
                   </p>
                   <p className="font-semibold text-slate-800">
-                    Dr. Ananya Kumar
+                    {doctorName}
                   </p>
                 </div>
 
@@ -463,6 +477,7 @@ function App() {
 
                 <button
                   onClick={() => {
+                    authService.logout().catch(() => {});
                     setLoggedIn(false);
                     setEmail("");
                     setPassword("");
@@ -488,42 +503,25 @@ function App() {
             <Dashboard
               setPage={setPage}
               setShowQR={setShowQR}
+              doctorName={doctorName}
             />
           )}
 
           {page === "Patients" && <Patients />}
 
-          {page === "New Case" && <NewCase />}
+          {page === "New Case" && <NewCase setPage={setPage} />}
 
-          {page === "Cases" && (
-            <InfoPage
-              title="Clinical Cases"
-              icon="📋"
-              text="View and manage patient clinical case records."
-            />
-          )}
+          {page === "Cases" && <CasesView setPage={setPage} />}
 
-          {page === "Documents" && (
-            <InfoPage
-              title="Medical Documents"
-              icon="📁"
-              text="Manage patient reports, scans and medical documents."
-            />
-          )}
+          {page === "Documents" && <DocumentsView />}
 
-          {page === "History" && (
-            <InfoPage
-              title="Medical History"
-              icon="🕒"
-              text="View patient medical history and previous consultations."
-            />
-          )}
+          {page === "History" && <HistoryView />}
 
-          {page === "Prescriptions" && <Prescription />}
+          {page === "Prescriptions" && <PrescriptionView />}
 
-          {page === "AI Assistant" && <AIAssistant />}
+          {page === "AI Assistant" && <AIAssistantView />}
 
-          {page === "Profile" && <Profile />}
+          {page === "Profile" && <ProfileView doctor={doctorProfile} setDoctor={setDoctorProfile} />}
 
           {scannedPatient && (
             <div className="mt-6">
@@ -661,17 +659,21 @@ function ScannedPatient({
 
         <div className="flex items-center gap-4">
 
-          <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center text-2xl">
-            👤
+          <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center text-2xl overflow-hidden">
+            {patient.photo ? (
+              <img src={patient.photo} alt={patient.fullName} className="w-full h-full object-cover" />
+            ) : (
+              "👤"
+            )}
           </div>
 
           <div>
             <h3 className="text-xl font-bold">
-              {patient.name}
+              {patient.fullName}
             </h3>
 
             <p className="text-cyan-100">
-              {patient.id}
+              {patient.patientId}
             </p>
           </div>
 
@@ -681,9 +683,9 @@ function ScannedPatient({
 
       <div className="grid md:grid-cols-2 gap-5 mt-6">
 
-        <PatientInfo title="Patient ID" value={patient.id} />
+        <PatientInfo title="Patient ID" value={patient.patientId} />
 
-        <PatientInfo title="Patient Name" value={patient.name} />
+        <PatientInfo title="Patient Name" value={patient.fullName} />
 
         <PatientInfo
           title="Age"
@@ -694,12 +696,12 @@ function ScannedPatient({
 
         <PatientInfo
           title="Medical Condition"
-          value={patient.condition}
+          value={patient.bloodGroup ? `Blood Group: ${patient.bloodGroup}` : "Active"}
         />
 
         <PatientInfo
           title="Record Status"
-          value="Active"
+          value={patient.status || "Active"}
         />
 
       </div>
@@ -707,7 +709,7 @@ function ScannedPatient({
       <div className="mt-6 bg-emerald-50 border border-emerald-200 rounded-xl p-4">
 
         <p className="text-emerald-700 text-sm font-medium">
-          ✓ Patient information successfully retrieved.
+          ✓ Patient information successfully retrieved from Express Backend API.
         </p>
 
       </div>
@@ -777,10 +779,20 @@ function Feature({
 function Dashboard({
   setPage,
   setShowQR,
+  doctorName,
 }: {
   setPage: (page: string) => void;
   setShowQR: (value: boolean) => void;
+  doctorName: string;
 }) {
+  const [recentPatients, setRecentPatients] = useState<Patient[]>([]);
+
+  useEffect(() => {
+    patientService.getPatients({ limit: 5 }).then((res) => {
+      if (res && res.data) setRecentPatients(res.data);
+    }).catch(() => {});
+  }, []);
+
   return (
     <>
 
@@ -794,7 +806,7 @@ function Dashboard({
             </p>
 
             <h2 className="text-2xl md:text-3xl font-bold text-slate-800">
-              Good Morning, Dr. Ananya 👋
+              Welcome, {doctorName} 👋
             </h2>
 
             <p className="text-slate-500 mt-1">
@@ -859,7 +871,7 @@ function Dashboard({
               </h2>
 
               <p className="text-xs text-cyan-600 mt-1">
-                Recently accessed patient records
+                Recently accessed patient records from Express Backend
               </p>
             </div>
 
@@ -874,7 +886,7 @@ function Dashboard({
 
           <div className="mt-5 space-y-3">
 
-            {patients.map((p) => (
+            {recentPatients.map((p) => (
 
               <div
                 key={p.id}
@@ -883,24 +895,28 @@ function Dashboard({
 
                 <div className="flex items-center gap-3">
 
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-100 to-blue-100 flex items-center justify-center">
-                    👤
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-100 to-blue-100 flex items-center justify-center overflow-hidden">
+                    {p.photo ? (
+                      <img src={p.photo} alt={p.fullName} className="w-full h-full object-cover" />
+                    ) : (
+                      "👤"
+                    )}
                   </div>
 
                   <div>
                     <b className="text-slate-800">
-                      {p.name}
+                      {p.fullName}
                     </b>
 
                     <p className="text-xs text-slate-500 mt-0.5">
-                      {p.id} • {p.age} years • {p.gender}
+                      {p.patientId} • {p.age} years • {p.gender}
                     </p>
                   </div>
 
                 </div>
 
                 <span className="text-xs sm:text-sm bg-gradient-to-r from-teal-50 to-emerald-50 text-teal-800 border border-teal-200 px-3 py-1.5 rounded-full font-medium">
-                  {p.condition}
+                  {p.bloodGroup ? `Blood: ${p.bloodGroup}` : p.status}
                 </span>
 
               </div>
@@ -1024,13 +1040,18 @@ function Stat({
 ========================= */
 
 function Patients() {
+  const [patientsList, setPatientsList] = useState<Patient[]>([]);
   const [search, setSearch] = useState("");
 
-  const filtered = patients.filter((p) =>
-    `${p.name} ${p.id} ${p.condition}`
-      .toLowerCase()
-      .includes(search.toLowerCase())
-  );
+  const loadPatients = (q?: string) => {
+    patientService.getPatients({ query: q }).then((res) => {
+      if (res && res.data) setPatientsList(res.data);
+    }).catch(() => {});
+  };
+
+  useEffect(() => {
+    loadPatients(search);
+  }, [search]);
 
   return (
     <div className="bg-gradient-to-br from-white via-blue-50/50 to-cyan-50/70 border border-blue-200 rounded-2xl p-6 shadow-sm">
@@ -1047,7 +1068,7 @@ function Patients() {
           </h2>
 
           <p className="text-sm text-slate-500">
-            Search and manage registered patients.
+            Search and manage registered patients (Express API connected).
           </p>
         </div>
 
@@ -1085,7 +1106,7 @@ function Patients() {
               </th>
 
               <th className="p-4 text-blue-800 text-sm">
-                Condition
+                Condition / Blood Group
               </th>
 
             </tr>
@@ -1094,7 +1115,7 @@ function Patients() {
 
           <tbody>
 
-            {filtered.map((p) => (
+            {patientsList.map((p) => (
 
               <tr
                 key={p.id}
@@ -1102,11 +1123,11 @@ function Patients() {
               >
 
                 <td className="p-4 text-blue-700 font-semibold">
-                  {p.id}
+                  {p.patientId}
                 </td>
 
                 <td className="p-4 font-medium text-slate-800">
-                  {p.name}
+                  {p.fullName}
                 </td>
 
                 <td className="p-4 text-slate-600">
@@ -1120,7 +1141,7 @@ function Patients() {
                 <td className="p-4">
 
                   <span className="bg-gradient-to-r from-blue-50 to-cyan-50 text-blue-800 border border-blue-200 px-3 py-1.5 rounded-full text-sm font-medium">
-                    {p.condition}
+                    {p.bloodGroup ? `Blood: ${p.bloodGroup}` : p.status}
                   </span>
 
                 </td>
@@ -1143,9 +1164,44 @@ function Patients() {
    NEW CASE
 ========================= */
 
-function NewCase() {
+function NewCase({ setPage }: { setPage: (p: string) => void }) {
+  const [patientName, setPatientName] = useState("");
+  const [patientId, setPatientId] = useState("");
+  const [chiefComplaint, setChiefComplaint] = useState("");
+  const [duration, setDuration] = useState("");
+  const [bp, setBp] = useState("");
+  const [temp, setTemp] = useState("");
+  const [notes, setNotes] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chiefComplaint.trim()) {
+      alert("Please enter chief complaint.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await caseService.createCase({
+        patientId: patientId || "pt_1001",
+        patientName: patientName || "Arun Kumar",
+        chiefComplaint,
+        duration,
+        examinationFindings: `BP: ${bp || '120/80 mmHg'}, Temp: ${temp || '98.6 F'}`,
+        additionalNotes: notes,
+        status: 'Draft'
+      });
+      alert("Clinical case saved successfully to backend!");
+      setPage("Cases");
+    } catch (err) {
+      alert("Error saving case to backend.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="bg-gradient-to-br from-white via-orange-50/40 to-amber-50/60 border border-orange-200 rounded-2xl p-6 shadow-sm">
+    <form onSubmit={handleSubmit} className="bg-gradient-to-br from-white via-orange-50/40 to-amber-50/60 border border-orange-200 rounded-2xl p-6 shadow-sm">
 
       <p className="text-sm font-medium text-orange-600">
         CLINICAL DOCUMENTATION
@@ -1156,22 +1212,70 @@ function NewCase() {
       </h2>
 
       <p className="text-slate-500 mt-1">
-        Enter patient consultation details.
+        Enter patient consultation details (Saves directly to Express API).
       </p>
 
       <div className="grid md:grid-cols-2 gap-5 mt-7">
 
-        <Input label="Patient Name" placeholder="Enter patient name" />
+        <div>
+          <label className="block text-sm font-semibold mb-2 text-slate-700">Patient Name</label>
+          <input
+            value={patientName}
+            onChange={(e) => setPatientName(e.target.value)}
+            placeholder="Enter patient name"
+            className="w-full border border-cyan-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 bg-white transition"
+          />
+        </div>
 
-        <Input label="Patient ID" placeholder="PT-XXXX" />
+        <div>
+          <label className="block text-sm font-semibold mb-2 text-slate-700">Patient ID</label>
+          <input
+            value={patientId}
+            onChange={(e) => setPatientId(e.target.value)}
+            placeholder="PT-1001"
+            className="w-full border border-cyan-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 bg-white transition"
+          />
+        </div>
 
-        <Input label="Chief Complaint" placeholder="Main complaint" />
+        <div>
+          <label className="block text-sm font-semibold mb-2 text-slate-700">Chief Complaint</label>
+          <input
+            value={chiefComplaint}
+            onChange={(e) => setChiefComplaint(e.target.value)}
+            placeholder="Main complaint"
+            className="w-full border border-cyan-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 bg-white transition"
+          />
+        </div>
 
-        <Input label="Duration" placeholder="e.g. 3 days" />
+        <div>
+          <label className="block text-sm font-semibold mb-2 text-slate-700">Duration</label>
+          <input
+            value={duration}
+            onChange={(e) => setDuration(e.target.value)}
+            placeholder="e.g. 3 days"
+            className="w-full border border-cyan-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 bg-white transition"
+          />
+        </div>
 
-        <Input label="Blood Pressure" placeholder="120/80 mmHg" />
+        <div>
+          <label className="block text-sm font-semibold mb-2 text-slate-700">Blood Pressure</label>
+          <input
+            value={bp}
+            onChange={(e) => setBp(e.target.value)}
+            placeholder="120/80 mmHg"
+            className="w-full border border-cyan-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 bg-white transition"
+          />
+        </div>
 
-        <Input label="Temperature" placeholder="98.6 °F" />
+        <div>
+          <label className="block text-sm font-semibold mb-2 text-slate-700">Temperature</label>
+          <input
+            value={temp}
+            onChange={(e) => setTemp(e.target.value)}
+            placeholder="98.6 °F"
+            className="w-full border border-cyan-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 bg-white transition"
+          />
+        </div>
 
       </div>
 
@@ -1183,161 +1287,381 @@ function NewCase() {
 
         <textarea
           rows={5}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
           placeholder="Enter clinical case notes..."
           className="w-full border border-orange-200 rounded-xl p-4 outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white transition"
         />
 
       </div>
 
-      <button className="mt-5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white px-6 py-3 rounded-xl font-semibold shadow-md transition">
-        Save Clinical Case →
-      </button>
-
-    </div>
-  );
-}
-
-/* =========================
-   INPUT
-========================= */
-
-function Input({
-  label,
-  placeholder,
-}: {
-  label: string;
-  placeholder: string;
-}) {
-  return (
-    <div>
-
-      <label className="block text-sm font-semibold mb-2 text-slate-700">
-        {label}
-      </label>
-
-      <input
-        placeholder={placeholder}
-        className="w-full border border-cyan-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 bg-white transition"
-      />
-
-    </div>
-  );
-}
-
-/* =========================
-   INFO PAGE
-========================= */
-
-function InfoPage({
-  title,
-  text,
-  icon,
-}: {
-  title: string;
-  text: string;
-  icon: string;
-}) {
-  const isDocuments = title === "Medical Documents";
-  const isHistory = title === "Medical History";
-
-  return (
-    <div
-      className={`${
-        isDocuments
-          ? "bg-gradient-to-br from-white via-amber-50/50 to-yellow-50/70 border-amber-200"
-          : isHistory
-          ? "bg-gradient-to-br from-white via-cyan-50/50 to-sky-50/70 border-cyan-200"
-          : "bg-gradient-to-br from-white via-violet-50/50 to-indigo-50/70 border-violet-200"
-      } border rounded-2xl p-10 text-center shadow-sm`}
-    >
-
-      <div
-        className={`w-20 h-20 mx-auto rounded-2xl flex items-center justify-center text-5xl ${
-          isDocuments
-            ? "bg-gradient-to-br from-amber-100 to-yellow-100 border border-amber-200"
-            : isHistory
-            ? "bg-gradient-to-br from-cyan-100 to-sky-100 border border-cyan-200"
-            : "bg-gradient-to-br from-violet-100 to-indigo-100 border border-violet-200"
-        }`}
-      >
-        {icon}
-      </div>
-
-      <h2 className="text-2xl font-bold text-slate-800 mt-5">
-        {title}
-      </h2>
-
-      <p className="text-slate-500 mt-2 max-w-md mx-auto">
-        {text}
-      </p>
-
       <button
-        className={`mt-6 text-white px-6 py-3 rounded-xl font-semibold shadow-md ${
-          isDocuments
-            ? "bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600"
-            : isHistory
-            ? "bg-gradient-to-r from-cyan-600 to-sky-600 hover:from-cyan-700 hover:to-sky-700"
-            : "bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700"
-        }`}
+        type="submit"
+        disabled={loading}
+        className="mt-5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white px-6 py-3 rounded-xl font-semibold shadow-md transition disabled:opacity-50"
       >
-        Add Record →
+        {loading ? "Saving Case..." : "Save Clinical Case →"}
       </button>
 
-    </div>
+    </form>
   );
 }
 
 /* =========================
-   PRESCRIPTION
+   CASES VIEW
 ========================= */
 
-function Prescription() {
+function CasesView({ setPage }: { setPage: (p: string) => void }) {
+  const [cases, setCases] = useState<ClinicalCase[]>([]);
+
+  useEffect(() => {
+    caseService.getCases().then((res) => {
+      if (res) setCases(res);
+    }).catch(() => {});
+  }, []);
+
   return (
-    <div className="bg-gradient-to-br from-white via-pink-50/50 to-purple-50/70 border border-pink-200 rounded-2xl p-6 shadow-sm">
+    <div className="bg-gradient-to-br from-white via-amber-50/50 to-orange-50/60 border border-orange-200 rounded-2xl p-6 shadow-sm">
 
-      <div className="flex items-center gap-3">
-
-        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center text-2xl border border-pink-200">
-          💊
-        </div>
-
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <p className="text-sm font-medium text-pink-600">
-            MEDICATION
-          </p>
-
-          <h2 className="text-xl font-bold text-slate-800">
-            Prescriptions
-          </h2>
+          <p className="text-sm font-medium text-orange-600">CLINICAL RECORDS</p>
+          <h2 className="text-xl font-bold text-slate-800 mt-1">Clinical Cases</h2>
+          <p className="text-sm text-slate-500">Live patient clinical case files from Express Backend.</p>
         </div>
 
+        <button
+          onClick={() => setPage("New Case")}
+          className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white px-5 py-2.5 rounded-xl font-semibold text-sm shadow-md transition"
+        >
+          ➕ New Case
+        </button>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-5 mt-7">
-
-        <Input label="Patient ID" placeholder="PT-1001" />
-
-        <Input label="Medicine" placeholder="Medicine name" />
-
-        <Input label="Dosage" placeholder="Dosage" />
-
-        <Input label="Duration" placeholder="Duration" />
-
+      <div className="space-y-4">
+        {cases.map((c) => (
+          <div key={c.id} className="border border-orange-100 bg-white rounded-xl p-5 hover:border-orange-300 transition">
+            <div className="flex justify-between items-start">
+              <div>
+                <span className="text-xs bg-orange-100 text-orange-800 px-3 py-1 rounded-full font-semibold">
+                  {c.caseNumber}
+                </span>
+                <h3 className="font-bold text-slate-800 text-lg mt-2">{c.patientName}</h3>
+                <p className="text-sm text-slate-600 mt-1"><b>Chief Complaint:</b> {c.chiefComplaint}</p>
+                {c.examinationFindings && (
+                  <p className="text-xs text-slate-500 mt-1"><b>Examination:</b> {c.examinationFindings}</p>
+                )}
+              </div>
+              <span className={`text-xs px-3 py-1 rounded-full font-semibold ${
+                c.status === 'Confirmed' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+              }`}>
+                {c.status}
+              </span>
+            </div>
+          </div>
+        ))}
       </div>
-
-      <button className="mt-6 bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white px-6 py-3 rounded-xl font-semibold shadow-md">
-        Create Prescription →
-      </button>
 
     </div>
   );
 }
 
 /* =========================
-   AI ASSISTANT
+   DOCUMENTS VIEW
 ========================= */
 
-function AIAssistant() {
+function DocumentsView() {
+  const [docs, setDocs] = useState<MedicalDocument[]>([]);
+  const [uploading, setUploading] = useState(false);
+
+  const loadDocs = () => {
+    documentService.getDocuments().then((res) => {
+      if (res) setDocs(res);
+    }).catch(() => {});
+  };
+
+  useEffect(() => {
+    loadDocs();
+  }, []);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      await documentService.uploadDocument(
+        {
+          documentName: file.name,
+          documentType: 'Lab Report',
+          patientId: 'pt_1001',
+          patientName: 'Arun Kumar'
+        },
+        file
+      );
+      alert('Document uploaded successfully to Express Backend!');
+      loadDocs();
+    } catch {
+      alert('Error uploading document.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="bg-gradient-to-br from-white via-amber-50/50 to-yellow-50/70 border border-amber-200 rounded-2xl p-6 shadow-sm">
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <p className="text-sm font-medium text-amber-600">MEDICAL RECORDS</p>
+          <h2 className="text-xl font-bold text-slate-800 mt-1">Medical Documents</h2>
+          <p className="text-sm text-slate-500">Patient lab reports, scans & digital documents.</p>
+        </div>
+
+        <label className="cursor-pointer bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-white px-5 py-2.5 rounded-xl font-semibold text-sm shadow-md transition">
+          {uploading ? "Uploading..." : "📁 Upload Document"}
+          <input type="file" onChange={handleFileUpload} className="hidden" />
+        </label>
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-4">
+        {docs.map((d) => (
+          <div key={d.id} className="border border-amber-200 bg-white rounded-xl p-5 hover:border-amber-400 transition">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-amber-100 text-amber-800 rounded-xl flex items-center justify-center text-2xl">
+                📄
+              </div>
+              <div className="flex-1">
+                <h3 className="font-bold text-slate-800">{d.documentName}</h3>
+                <p className="text-xs text-slate-500 mt-0.5">{d.patientName} • {d.documentType} • {d.fileSize}</p>
+                {d.extractedInfo && (
+                  <p className="text-xs text-amber-900 bg-amber-50 border border-amber-100 rounded-lg p-2 mt-2">
+                    {d.extractedInfo}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* =========================
+   HISTORY VIEW
+========================= */
+
+function HistoryView() {
+  const [history, setHistory] = useState<HistoryEvent[]>([]);
+
+  useEffect(() => {
+    historyService.getHistory('pt_1001').then((res) => {
+      if (res) setHistory(res);
+    }).catch(() => {});
+  }, []);
+
+  return (
+    <div className="bg-gradient-to-br from-white via-cyan-50/50 to-sky-50/70 border border-cyan-200 rounded-2xl p-6 shadow-sm">
+      <div className="mb-6">
+        <p className="text-sm font-medium text-cyan-600">CONSULTATION TIMELINE</p>
+        <h2 className="text-xl font-bold text-slate-800 mt-1">Medical History</h2>
+        <p className="text-sm text-slate-500">Chronological history events from Express Backend.</p>
+      </div>
+
+      <div className="space-y-4">
+        {history.map((h) => (
+          <div key={h.id} className="border border-cyan-100 bg-white rounded-xl p-5 flex gap-4 items-start hover:border-cyan-300 transition">
+            <div className="w-10 h-10 bg-cyan-100 text-cyan-800 rounded-full flex items-center justify-center text-lg">
+              🕒
+            </div>
+            <div>
+              <span className="text-xs text-cyan-600 font-semibold">{h.date}</span>
+              <h3 className="font-bold text-slate-800 text-base mt-0.5">{h.title}</h3>
+              <p className="text-sm text-slate-600 mt-1">{h.description}</p>
+              <p className="text-xs text-slate-400 mt-1"><b>Doctor:</b> {h.doctor} • {h.hospital}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* =========================
+   PRESCRIPTION VIEW
+========================= */
+
+function PrescriptionView() {
+  const [prescriptions, setPrescriptions] = useState<PrescriptionType[]>([]);
+  const [patientId, setPatientId] = useState("PT-1001");
+  const [medicine, setMedicine] = useState("");
+  const [dosage, setDosage] = useState("");
+  const [duration, setDuration] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const loadPrescriptions = () => {
+    prescriptionService.getPrescriptions().then((res) => {
+      if (res) setPrescriptions(res);
+    }).catch(() => {});
+  };
+
+  useEffect(() => {
+    loadPrescriptions();
+  }, []);
+
+  const handleCreatePrescription = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!medicine.trim()) {
+      alert("Please enter medicine name.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await prescriptionService.createPrescription({
+        patientId: patientId || "pt_1001",
+        patientName: "Arun Kumar",
+        medicines: [
+          {
+            id: `med-${Date.now()}`,
+            medicineName: medicine,
+            dosage: dosage || "5mg",
+            frequency: "1-0-1",
+            duration: duration || "30 Days",
+            instructions: "Take after food"
+          }
+        ],
+        notes: "Take regularly as prescribed.",
+        status: "Confirmed"
+      });
+      alert("Prescription created successfully on Express Backend!");
+      setMedicine("");
+      setDosage("");
+      setDuration("");
+      loadPrescriptions();
+    } catch {
+      alert("Error creating prescription.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <form onSubmit={handleCreatePrescription} className="bg-gradient-to-br from-white via-pink-50/50 to-purple-50/70 border border-pink-200 rounded-2xl p-6 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-pink-100 to-purple-100 flex items-center justify-center text-2xl border border-pink-200">
+            💊
+          </div>
+          <div>
+            <p className="text-sm font-medium text-pink-600">MEDICATION</p>
+            <h2 className="text-xl font-bold text-slate-800">Prescriptions</h2>
+          </div>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-5 mt-7">
+          <div>
+            <label className="block text-sm font-semibold mb-2 text-slate-700">Patient ID</label>
+            <input
+              value={patientId}
+              onChange={(e) => setPatientId(e.target.value)}
+              placeholder="PT-1001"
+              className="w-full border border-pink-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-pink-500 focus:border-pink-500 bg-white transition"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-2 text-slate-700">Medicine</label>
+            <input
+              value={medicine}
+              onChange={(e) => setMedicine(e.target.value)}
+              placeholder="Medicine name"
+              className="w-full border border-pink-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-pink-500 focus:border-pink-500 bg-white transition"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-2 text-slate-700">Dosage</label>
+            <input
+              value={dosage}
+              onChange={(e) => setDosage(e.target.value)}
+              placeholder="Dosage"
+              className="w-full border border-pink-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-pink-500 focus:border-pink-500 bg-white transition"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-2 text-slate-700">Duration</label>
+            <input
+              value={duration}
+              onChange={(e) => setDuration(e.target.value)}
+              placeholder="Duration"
+              className="w-full border border-pink-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-pink-500 focus:border-pink-500 bg-white transition"
+            />
+          </div>
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="mt-6 bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 text-white px-6 py-3 rounded-xl font-semibold shadow-md transition disabled:opacity-50"
+        >
+          {loading ? "Creating..." : "Create Prescription →"}
+        </button>
+      </form>
+
+      <div className="bg-white border border-pink-200 rounded-2xl p-6 shadow-sm">
+        <h3 className="font-bold text-slate-800 text-lg mb-4">Active Prescriptions</h3>
+        <div className="space-y-4">
+          {prescriptions.map((rx) => (
+            <div key={rx.id} className="border border-pink-100 rounded-xl p-4 bg-pink-50/40">
+              <div className="flex justify-between items-center">
+                <span className="font-bold text-pink-700">{rx.prescriptionNumber}</span>
+                <span className="text-xs bg-pink-100 text-pink-800 px-3 py-1 rounded-full font-semibold">{rx.status}</span>
+              </div>
+              <p className="text-sm font-semibold text-slate-800 mt-2">Patient: {rx.patientName}</p>
+              <div className="mt-2 space-y-1">
+                {rx.medicines?.map((m) => (
+                  <p key={m.id} className="text-xs text-slate-600">
+                    • <b>{m.medicineName}</b> ({m.dosage}) - {m.frequency} for {m.duration}
+                  </p>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =========================
+   AI ASSISTANT VIEW
+========================= */
+
+function AIAssistantView() {
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [sources, setSources] = useState<AISource[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const handleSend = async () => {
+    if (!question.trim()) return;
+    setLoading(true);
+    try {
+      const res = await doctorAIService.query({
+        patientId: "pt_1001",
+        question: question.trim()
+      });
+      if (res) {
+        setAnswer(res.answer);
+        setSources(res.sources || []);
+      }
+    } catch {
+      setAnswer("Error connecting to Doctor AI Assistant API.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="bg-gradient-to-br from-white via-purple-50/50 to-indigo-50/70 border border-purple-200 rounded-2xl p-6 max-w-3xl shadow-sm">
 
@@ -1358,7 +1682,7 @@ function AIAssistant() {
           </h2>
 
           <p className="text-sm text-slate-500">
-            Patient record assistance
+            Patient record assistance (Connected to Express AI API)
           </p>
 
         </div>
@@ -1369,14 +1693,35 @@ function AIAssistant() {
 
         <div className="flex gap-3">
 
-          <div className="w-8 h-8 bg-gradient-to-br from-purple-100 to-indigo-100 border border-purple-200 rounded-full flex items-center justify-center">
+          <div className="w-8 h-8 bg-gradient-to-br from-purple-100 to-indigo-100 border border-purple-200 rounded-full flex items-center justify-center shrink-0">
             🤖
           </div>
 
-          <p className="text-purple-700 text-sm pt-1">
-            AI responses will appear here when the backend AI service is
-            connected.
-          </p>
+          <div className="text-purple-900 text-sm pt-1 space-y-3">
+            {loading ? (
+              <p className="animate-pulse">Thinking and querying patient records...</p>
+            ) : answer ? (
+              <>
+                <p className="leading-relaxed font-medium">{answer}</p>
+                {sources.length > 0 && (
+                  <div className="mt-3 border-t border-purple-200 pt-2">
+                    <p className="text-xs font-semibold text-purple-700 mb-1">Sources Reference:</p>
+                    <ul className="text-xs space-y-1">
+                      {sources.map((s, idx) => (
+                        <li key={idx} className="bg-purple-100/70 px-2.5 py-1 rounded-md">
+                          📌 {s.type}: {s.title} ({s.date || 'Record'})
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-purple-700">
+                Ask a clinical question about patient records (e.g. "What is the patient blood pressure?", "Check Penicillin allergy", or "Lipid lab report").
+              </p>
+            )}
+          </div>
 
         </div>
 
@@ -1385,12 +1730,21 @@ function AIAssistant() {
       <div className="flex gap-3 mt-5">
 
         <input
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleSend();
+          }}
           placeholder="Ask about a patient record..."
           className="flex-1 border border-purple-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white transition"
         />
 
-        <button className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white px-6 rounded-xl font-semibold shadow-md">
-          Send
+        <button
+          onClick={handleSend}
+          disabled={loading}
+          className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white px-6 rounded-xl font-semibold shadow-md transition disabled:opacity-50"
+        >
+          {loading ? "Asking..." : "Send"}
         </button>
 
       </div>
@@ -1400,17 +1754,47 @@ function AIAssistant() {
 }
 
 /* =========================
-   PROFILE
+   PROFILE VIEW
 ========================= */
 
-function Profile() {
+function ProfileView({ doctor, setDoctor }: { doctor: Doctor | null; setDoctor: (d: Doctor) => void }) {
+  const [name, setName] = useState(doctor?.name || "Dr. Rajesh Sharma");
+  const [email, setEmail] = useState(doctor?.email || "doctor@medicare.com");
+  const [phone, setPhone] = useState(doctor?.mobile || "+91 98765 43210");
+  const [department, setDepartment] = useState(doctor?.department || "Cardiology Department");
+  const [hospital, setHospital] = useState(doctor?.hospital || "MediCare Super Speciality Hospital");
+
+  const handleUpdate = (e: React.FormEvent) => {
+    e.preventDefault();
+    const updated = {
+      ...(doctor || {
+        id: "DOC-101",
+        specialization: "General Cardiology & Internal Medicine",
+        licenseNumber: "MCI-2015-884920",
+        hospitalId: "HOSP-4002",
+        role: "doctor" as const
+      }),
+      name,
+      email,
+      mobile: phone,
+      department,
+      hospital
+    };
+    setDoctor(updated);
+    alert("Profile updated successfully!");
+  };
+
   return (
-    <div className="bg-gradient-to-br from-white via-rose-50/50 to-pink-50/70 border border-rose-200 rounded-2xl p-6 max-w-2xl shadow-sm">
+    <form onSubmit={handleUpdate} className="bg-gradient-to-br from-white via-rose-50/50 to-pink-50/70 border border-rose-200 rounded-2xl p-6 max-w-2xl shadow-sm">
 
       <div className="flex gap-5 items-center">
 
-        <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-rose-100 to-pink-100 flex items-center justify-center text-4xl border border-rose-200">
-          👩‍⚕️
+        <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-rose-100 to-pink-100 flex items-center justify-center text-4xl border border-rose-200 overflow-hidden">
+          {doctor?.avatar ? (
+            <img src={doctor.avatar} alt="Doctor" className="w-full h-full object-cover" />
+          ) : (
+            "👩‍⚕️"
+          )}
         </div>
 
         <div>
@@ -1420,15 +1804,15 @@ function Profile() {
           </p>
 
           <h2 className="text-2xl font-bold text-slate-800">
-            Dr. Ananya Kumar
+            {name}
           </h2>
 
-          <p className="text-rose-600">
-            General Physician
+          <p className="text-rose-600 font-medium">
+            {doctor?.specialization || "General Physician"}
           </p>
 
           <p className="text-sm text-slate-400 mt-1">
-            Doctor ID: DOC-2026-001
+            Doctor ID: {doctor?.id || "DOC-101"}
           </p>
 
         </div>
@@ -1437,33 +1821,58 @@ function Profile() {
 
       <div className="grid md:grid-cols-2 gap-5 mt-8">
 
-        <Input
-          label="Email"
-          placeholder="doctor@medicare.com"
-        />
+        <div>
+          <label className="block text-sm font-semibold mb-2 text-slate-700">Doctor Name</label>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full border border-rose-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-500 bg-white transition"
+          />
+        </div>
 
-        <Input
-          label="Phone"
-          placeholder="+91 XXXXX XXXXX"
-        />
+        <div>
+          <label className="block text-sm font-semibold mb-2 text-slate-700">Email</label>
+          <input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full border border-rose-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-500 bg-white transition"
+          />
+        </div>
 
-        <Input
-          label="Department"
-          placeholder="General Medicine"
-        />
+        <div>
+          <label className="block text-sm font-semibold mb-2 text-slate-700">Phone</label>
+          <input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            className="w-full border border-rose-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-500 bg-white transition"
+          />
+        </div>
 
-        <Input
-          label="Hospital"
-          placeholder="MediCare Hospital"
-        />
+        <div>
+          <label className="block text-sm font-semibold mb-2 text-slate-700">Department</label>
+          <input
+            value={department}
+            onChange={(e) => setDepartment(e.target.value)}
+            className="w-full border border-rose-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-500 bg-white transition"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-semibold mb-2 text-slate-700">Hospital</label>
+          <input
+            value={hospital}
+            onChange={(e) => setHospital(e.target.value)}
+            className="w-full border border-rose-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-500 bg-white transition"
+          />
+        </div>
 
       </div>
 
-      <button className="mt-6 bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 text-white px-6 py-3 rounded-xl font-semibold shadow-md">
+      <button type="submit" className="mt-6 bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-700 hover:to-pink-700 text-white px-6 py-3 rounded-xl font-semibold shadow-md transition">
         Update Profile →
       </button>
 
-    </div>
+    </form>
   );
 }
 
